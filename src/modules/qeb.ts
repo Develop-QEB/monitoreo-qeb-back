@@ -337,6 +337,124 @@ interface UsuarioRow extends RowDataPacket {
 }
 
 // ============================================================
+// stats MySQL (SHOW STATUS + tablas)
+// ============================================================
+
+interface StatusRow extends RowDataPacket {
+  Variable_name: string
+  Value: string
+}
+
+qebRouter.get('/db/status', async (_req: Request, res: Response) => {
+  const pool = getQebPool()!
+  try {
+    const [statusRows] = await pool.query<StatusRow[]>(
+      `SHOW GLOBAL STATUS WHERE Variable_name IN (
+        'Uptime',
+        'Threads_connected',
+        'Threads_running',
+        'Max_used_connections',
+        'Questions',
+        'Slow_queries',
+        'Aborted_connects',
+        'Innodb_buffer_pool_pages_total',
+        'Innodb_buffer_pool_pages_free',
+        'Innodb_buffer_pool_pages_dirty',
+        'Innodb_row_lock_time_avg',
+        'Innodb_row_lock_waits',
+        'Bytes_sent',
+        'Bytes_received',
+        'Com_select',
+        'Com_insert',
+        'Com_update',
+        'Com_delete'
+      )`,
+    )
+    const [varsRows] = await pool.query<StatusRow[]>(
+      `SHOW GLOBAL VARIABLES WHERE Variable_name IN ('max_connections', 'version', 'innodb_buffer_pool_size')`,
+    )
+
+    const status: Record<string, string> = {}
+    statusRows.forEach((r) => (status[r.Variable_name] = r.Value))
+    const vars: Record<string, string> = {}
+    varsRows.forEach((r) => (vars[r.Variable_name] = r.Value))
+
+    const uptime = parseInt(status.Uptime ?? '0', 10)
+    const questions = parseInt(status.Questions ?? '0', 10)
+    const bufferTotal = parseInt(status.Innodb_buffer_pool_pages_total ?? '0', 10)
+    const bufferFree = parseInt(status.Innodb_buffer_pool_pages_free ?? '0', 10)
+    const bufferUsedPct = bufferTotal > 0 ? ((bufferTotal - bufferFree) / bufferTotal) * 100 : 0
+
+    return res.json({
+      uptime_sec: uptime,
+      version: vars.version ?? 'unknown',
+      max_connections: parseInt(vars.max_connections ?? '0', 10),
+      threads_connected: parseInt(status.Threads_connected ?? '0', 10),
+      threads_running: parseInt(status.Threads_running ?? '0', 10),
+      max_used_connections: parseInt(status.Max_used_connections ?? '0', 10),
+      queries_total: questions,
+      queries_per_sec_avg: uptime > 0 ? Number((questions / uptime).toFixed(2)) : 0,
+      slow_queries: parseInt(status.Slow_queries ?? '0', 10),
+      aborted_connects: parseInt(status.Aborted_connects ?? '0', 10),
+      buffer_pool_used_pct: Number(bufferUsedPct.toFixed(1)),
+      innodb_buffer_pool_size_mb:
+        Math.round(parseInt(vars.innodb_buffer_pool_size ?? '0', 10) / (1024 * 1024)),
+      innodb_row_lock_waits: parseInt(status.Innodb_row_lock_waits ?? '0', 10),
+      innodb_row_lock_time_avg_ms: parseInt(status.Innodb_row_lock_time_avg ?? '0', 10),
+      bytes_sent_gb: Number((parseInt(status.Bytes_sent ?? '0', 10) / 1024 / 1024 / 1024).toFixed(2)),
+      bytes_received_gb: Number((parseInt(status.Bytes_received ?? '0', 10) / 1024 / 1024 / 1024).toFixed(2)),
+      commands: {
+        select: parseInt(status.Com_select ?? '0', 10),
+        insert: parseInt(status.Com_insert ?? '0', 10),
+        update: parseInt(status.Com_update ?? '0', 10),
+        delete: parseInt(status.Com_delete ?? '0', 10),
+      },
+    })
+  } catch (err) {
+    console.error('[/api/qeb/db/status]', err)
+    return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+interface TableSizeRow extends RowDataPacket {
+  table_name: string
+  table_rows: number | null
+  data_length: number | null
+  index_length: number | null
+  total_size: number | null
+}
+
+qebRouter.get('/db/tables', async (_req: Request, res: Response) => {
+  const pool = getQebPool()!
+  try {
+    const [rows] = await pool.query<TableSizeRow[]>(
+      `SELECT
+         TABLE_NAME       AS table_name,
+         TABLE_ROWS       AS table_rows,
+         DATA_LENGTH      AS data_length,
+         INDEX_LENGTH     AS index_length,
+         (DATA_LENGTH + INDEX_LENGTH) AS total_size
+       FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = DATABASE()
+       ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC
+       LIMIT 15`,
+    )
+    return res.json({
+      tables: rows.map((r) => ({
+        table: r.table_name,
+        rows: r.table_rows ?? 0,
+        data_mb: Number(((r.data_length ?? 0) / 1024 / 1024).toFixed(1)),
+        index_mb: Number(((r.index_length ?? 0) / 1024 / 1024).toFixed(1)),
+        total_mb: Number(((r.total_size ?? 0) / 1024 / 1024).toFixed(1)),
+      })),
+    })
+  } catch (err) {
+    console.error('[/api/qeb/db/tables]', err)
+    return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// ============================================================
 // índices críticos (verificación estática)
 // ============================================================
 
