@@ -30,6 +30,19 @@ app.get('/health', (_req, res) => {
   })
 })
 
+// Endpoint temporal — sirve para saber con qué IP sale el back al mundo
+// para poder agregarla a Trusted Sources de la DB. Sin auth porque la
+// info no es sensible. Remover cuando ya no se necesite.
+app.get('/debug/outbound-ip', async (_req, res) => {
+  try {
+    const r = await fetch('https://ifconfig.me/ip')
+    const ip = (await r.text()).trim()
+    res.json({ outboundIp: ip })
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'error' })
+  }
+})
+
 app.use('/api', apiRouter)
 
 app.use(notFound)
