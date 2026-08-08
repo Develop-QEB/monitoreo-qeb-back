@@ -19,6 +19,7 @@ import {
 import { streamAndCapture } from '../lib/logsCapture'
 import { verifyJwt } from '../lib/jwt'
 import { prisma } from '../lib/prisma'
+import { bgCapture } from '../lib/backgroundCapture'
 
 export const infraRouter: Router = Router()
 
@@ -258,6 +259,11 @@ infraRouter.get('/do/app/logs/db/:id/context', async (req: Request<{ id: string 
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message })
   }
+})
+
+// Estado del background capturer (útil para saber si 24/7 está corriendo)
+infraRouter.get('/do/app/logs/capture', (_req: Request, res: Response) => {
+  return res.json(bgCapture.status())
 })
 
 infraRouter.get('/do/app/logs/db/stats', async (_req: Request, res: Response) => {

@@ -5,6 +5,7 @@ import morgan from 'morgan'
 import { env, isProd } from './config/env'
 import { apiRouter } from './routes'
 import { errorHandler, notFound } from './middleware/error'
+import { bgCapture } from './lib/backgroundCapture'
 
 const app = express()
 
@@ -51,4 +52,9 @@ app.use(errorHandler)
 
 app.listen(env.PORT, () => {
   console.log(`[monitoreo-qeb-back] listening on http://localhost:${env.PORT} (${env.NODE_ENV})`)
+  // Captura de logs 24/7 (mientras el proceso esté vivo).
+  bgCapture.start()
 })
+
+process.on('SIGTERM', () => bgCapture.stop())
+process.on('SIGINT', () => bgCapture.stop())
