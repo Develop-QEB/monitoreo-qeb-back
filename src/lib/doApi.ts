@@ -154,6 +154,24 @@ async function tryLogsEndpoint(path: string, debug: LogsFetchDebug): Promise<str
   }
 }
 
+// Obtiene el live_url (HTTP chunked) para tailing en tiempo real.
+export async function getDoAppLiveLogsUrl(): Promise<string | null> {
+  try {
+    const appInfo = await getDoAppInfo()
+    const deploymentId = appInfo.active_deployment?.id
+    const componentName = appInfo.spec?.name
+    if (!deploymentId || !componentName) return null
+
+    const meta = (await doFetch(
+      `/apps/${env.DO_APP_ID_QEB_BACK!}/deployments/${deploymentId}/components/${componentName}/logs?type=RUN&follow=true`,
+    )) as AppLogsUrlsResponse
+
+    return meta.live_url ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function fetchDoAppRuntimeLogs(
   maxLines = 300,
 ): Promise<{ lines: AppLogLine[]; debug: LogsFetchDebug }> {
