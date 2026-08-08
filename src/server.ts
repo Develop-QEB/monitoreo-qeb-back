@@ -43,37 +43,6 @@ app.get('/debug/outbound-ip', async (_req, res) => {
   }
 })
 
-// Endpoint temporal — compara process.env vs env module vs configured flags.
-app.get('/debug/env-check', (_req, res) => {
-  res.json({
-    processEnv: {
-      VERCEL_TOKEN:        !!process.env.VERCEL_TOKEN,
-      VERCEL_PROJECT_ID:   !!process.env.VERCEL_PROJECT_ID,
-      DO_API_TOKEN:        !!process.env.DO_API_TOKEN,
-      DO_APP_ID_QEB_BACK:  !!process.env.DO_APP_ID_QEB_BACK,
-      DO_DB_CLUSTER_ID:    !!process.env.DO_DB_CLUSTER_ID,
-    },
-    envModule: {
-      VERCEL_TOKEN:        !!env.VERCEL_TOKEN,
-      VERCEL_PROJECT_ID:   !!env.VERCEL_PROJECT_ID,
-      DO_API_TOKEN:        !!env.DO_API_TOKEN,
-      DO_APP_ID_QEB_BACK:  !!env.DO_APP_ID_QEB_BACK,
-      DO_DB_CLUSTER_ID:    !!env.DO_DB_CLUSTER_ID,
-    },
-    configured: {
-      vercel: !!(env.VERCEL_TOKEN && env.VERCEL_PROJECT_ID),
-      doApp:  !!(env.DO_API_TOKEN && env.DO_APP_ID_QEB_BACK),
-      doDb:   !!(env.DO_API_TOKEN && env.DO_DB_CLUSTER_ID),
-    },
-    lengths: {
-      VERCEL_TOKEN:        env.VERCEL_TOKEN?.length ?? 0,
-      VERCEL_PROJECT_ID:   env.VERCEL_PROJECT_ID?.length ?? 0,
-      DO_API_TOKEN:        env.DO_API_TOKEN?.length ?? 0,
-      DO_APP_ID_QEB_BACK:  env.DO_APP_ID_QEB_BACK?.length ?? 0,
-      DO_DB_CLUSTER_ID:    env.DO_DB_CLUSTER_ID?.length ?? 0,
-    },
-  })
-})
 
 app.use('/api', apiRouter)
 
