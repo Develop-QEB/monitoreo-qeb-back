@@ -184,15 +184,28 @@ usersRouter.delete('/:id', requireRole('admin'), async (req: Request<{ id: strin
   return res.json({ ok: true })
 })
 
-// reset password — admin only, genera nueva y la devuelve una sola vez
+// reset password — admin only.
+// Sin body → genera password aleatoria y la devuelve una sola vez.
+// Body { password } → usa esa (min 6 chars) y NO la devuelve (admin ya la conoce).
+const resetPasswordSchema = z.object({
+  password: z.string().min(6).max(120).optional(),
+})
+
 usersRouter.post('/:id/reset-password', requireRole('admin'), async (req: Request<{ id: string }>, res: Response) => {
+  const parsed = resetPasswordSchema.safeParse(req.body ?? {})
+  if (!parsed.success) return res.status(400).json({ error: 'password inválida (mínimo 6 caracteres)' })
+
   const target = await prisma.user.findUnique({ where: { id: req.params.id } })
   if (!target) return res.status(404).json({ error: 'user not found' })
 
-  const words = ['blue', 'ninja', 'rocket', 'orbit', 'sonic', 'cobra', 'lunar', 'quartz']
-  const word = words[Math.floor(Math.random() * words.length)]
-  const num = Math.floor(1000 + Math.random() * 9000)
-  const newPassword = `${word}-${num}`
+  let newPassword = parsed.data.password
+  const generated = !newPassword
+  if (!newPassword) {
+    const words = ['blue', 'ninja', 'rocket', 'orbit', 'sonic', 'cobra', 'lunar', 'quartz']
+    const word = words[Math.floor(Math.random() * words.length)]
+    const num = Math.floor(1000 + Math.random() * 9000)
+    newPassword = `${word}-${num}`
+  }
 
   await prisma.user.update({
     where: { id: req.params.id },
@@ -203,7 +216,8 @@ usersRouter.post('/:id/reset-password', requireRole('admin'), async (req: Reques
     actor: req.user!.email,
     action: 'user.password_reset',
     target: target.email,
+    details: generated ? 'generada aleatoria' : 'establecida manualmente',
   })
 
-  return res.json({ ok: true, newPassword })
+  return res.json({ ok: true, generated, newPassword: generated ? newPassword : undefined })
 })
