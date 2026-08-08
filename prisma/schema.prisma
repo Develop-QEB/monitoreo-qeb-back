@@ -1,0 +1,100 @@
+// Schema del monitor. Vive en dashboard_dev (cluster qeb-mysql-dev de DO).
+// Fase 1: users + audit_events. Fase 2: logs, deploys, errors, queries.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String    @db.VarChar(120)
+  email        String    @unique @db.VarChar(190)
+  passwordHash String    @db.VarChar(255)
+  role         String    @db.VarChar(30) // 'admin' | 'ti' | 'mejora-continua'
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  @@map("monitor_users")
+}
+
+model AuditEvent {
+  id      String   @id @default(cuid())
+  ts      DateTime @default(now())
+  actor   String   @db.VarChar(190)
+  action  String   @db.VarChar(60) // ver enum en front src/stores/auditStore.ts
+  target  String?  @db.VarChar(190)
+  details String?  @db.Text
+
+  @@index([ts])
+  @@index([action])
+  @@index([actor])
+  @@map("monitor_audit_events")
+}
+
+// ---- FASE 2 (stubs, aún no usados) ----
+
+model LogEntry {
+  id        String   @id @default(cuid())
+  ts        DateTime @default(now())
+  source    String   @db.VarChar(30) // 'back' | 'front' | 'sap' | 'system'
+  level     String   @db.VarChar(10) // 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL'
+  msg       String   @db.Text
+  meta      String?  @db.Text // JSON serializado
+  requestId String?  @db.VarChar(60)
+
+  @@index([ts])
+  @@index([level])
+  @@index([source])
+  @@index([requestId])
+  @@map("monitor_logs")
+}
+
+model DeployRecord {
+  id         String   @id @default(cuid())
+  ts         DateTime @default(now())
+  service    String   @db.VarChar(20) // 'front' | 'back'
+  hash       String   @db.VarChar(40)
+  branch     String   @db.VarChar(80)
+  actor      String?  @db.VarChar(120)
+  status     String   @db.VarChar(20) // 'queued' | 'building' | 'deploying' | 'ready' | 'error'
+  durationMs Int?
+  meta       String?  @db.Text
+
+  @@index([service, ts])
+  @@map("monitor_deploys")
+}
+
+model ErrorGroup {
+  id        String   @id @default(cuid())
+  signature String   @unique @db.VarChar(255)
+  source    String   @db.VarChar(30)
+  message   String   @db.Text
+  count     Int      @default(1)
+  firstSeen DateTime @default(now())
+  lastSeen  DateTime @default(now())
+
+  @@index([source, lastSeen])
+  @@map("monitor_error_groups")
+}
+
+model QueryStat {
+  id        String   @id @default(cuid())
+  sqlHash   String   @unique @db.VarChar(64)
+  sql       String   @db.Text
+  endpoint  String?  @db.VarChar(190)
+  p95Ms     Int?
+  p99Ms     Int?
+  frequency Int      @default(0)
+  errorRate Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@map("monitor_query_stats")
+}
