@@ -18,6 +18,15 @@ export const env = {
   CORS_ORIGINS: (process.env.CORS_ORIGINS ?? 'http://localhost:5175')
     .split(',')
     .map((s) => s.trim()),
+
+  // Integraciones de infra · todas opcionales. Si falta alguna,
+  // los endpoints devuelven { configured: false } sin romper.
+  VERCEL_TOKEN: process.env.VERCEL_TOKEN,
+  VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID, // ID del proyecto de front-qeb en Vercel
+  VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,       // opcional si el proyecto vive en un team
+  DO_API_TOKEN: process.env.DO_API_TOKEN,
+  DO_APP_ID_QEB_BACK: process.env.DO_APP_ID_QEB_BACK, // UUID del App qeb-back en DO
+  DO_DB_CLUSTER_ID: process.env.DO_DB_CLUSTER_ID,     // UUID del cluster qeb-mysql-prod en DO
 }
 
 export const isProd = env.NODE_ENV === 'production'
