@@ -227,15 +227,25 @@ export async function fetchDoAppRuntimeLogs(
   )
   const full = bodies.join('\n')
 
-  // Parsear timestamp ISO al principio de cada línea
-  const tsRegex = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(.*)$/
+  // Parsear cada línea. DO prefija con el nombre del componente
+  // ("qeb-back") + timestamp ISO + mensaje (con códigos ANSI de morgan).
+  //
+  //   qeb-back 2026-08-08T03:49:45.051Z [0mGET /api/... [32m200[0m 70ms - 418[0m
+  //   |_______| |___________________| |_________________________________________|
+  //   componente     timestamp                  mensaje sucio
+  const withPrefix = /^(?:[^\s]+\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(.*)$/
+  // Códigos ANSI: pueden venir con o sin el byte de escape \x1b
+  const ansiRegex = /\x1b?\[[\d;]*m/g
+
   const lines = full
     .split('\n')
     .map<AppLogLine>((raw) => {
-      const m = tsRegex.exec(raw)
-      return m ? { ts: m[1], raw: m[2] } : { ts: null, raw }
+      const m = withPrefix.exec(raw)
+      const ts = m ? m[1] : null
+      const msg = (m ? m[2] : raw).replace(ansiRegex, '').trim()
+      return { ts, raw: msg }
     })
-    .filter((l) => l.raw.trim().length > 0)
+    .filter((l) => l.raw.length > 0)
 
   return { lines: lines.slice(-maxLines), debug }
 }
