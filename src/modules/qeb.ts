@@ -189,6 +189,84 @@ interface TicketDistRow extends RowDataPacket {
   count: number
 }
 
+interface TicketFullRow extends RowDataPacket {
+  id: number
+  titulo: string
+  descripcion: string
+  imagen: string | null
+  status: string
+  prioridad: string
+  categoria: string | null
+  area: string
+  usuario_id: number
+  usuario_nombre: string
+  usuario_email: string
+  respuesta: string | null
+  respondido_por: string | null
+  respondido_at: Date | string | null
+  created_at: Date | string
+  updated_at: Date | string
+  status_cambiado_por: string | null
+}
+
+interface TicketMessageRow extends RowDataPacket {
+  id: number
+  ticket_id: number
+  usuario_id: number
+  usuario_nombre: string
+  mensaje: string | null
+  archivo_url: string | null
+  archivo_nombre: string | null
+  archivo_tipo: string | null
+  created_at: Date | string
+}
+
+// Ticket individual con detalles + mensajes + chat asociados
+qebRouter.get('/tickets/:id', async (req: Request<{ id: string }>, res: Response) => {
+  const pool = getQebPool()!
+  const id = parseInt(req.params.id, 10)
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'id invalido' })
+  try {
+    const [ticketRows] = await pool.query<TicketFullRow[]>(
+      `SELECT id, titulo, descripcion, imagen, status, prioridad, categoria, area,
+              usuario_id, usuario_nombre, usuario_email,
+              respuesta, respondido_por, respondido_at,
+              created_at, updated_at, status_cambiado_por
+       FROM tickets
+       WHERE id = ?
+       LIMIT 1`,
+      [id],
+    )
+    if (ticketRows.length === 0) return res.status(404).json({ error: 'ticket no existe' })
+
+    const [mensajes] = await pool.query<TicketMessageRow[]>(
+      `SELECT id, ticket_id, usuario_id, usuario_nombre, mensaje,
+              archivo_url, archivo_nombre, archivo_tipo, created_at
+       FROM ticket_mensajes
+       WHERE ticket_id = ?
+       ORDER BY created_at ASC`,
+      [id],
+    )
+    const [chat] = await pool.query<TicketMessageRow[]>(
+      `SELECT id, ticket_id, usuario_id, usuario_nombre, mensaje,
+              archivo_url, archivo_nombre, archivo_tipo, created_at
+       FROM ticket_chat
+       WHERE ticket_id = ?
+       ORDER BY created_at ASC`,
+      [id],
+    )
+
+    return res.json({
+      ticket: ticketRows[0],
+      mensajes,
+      chat,
+    })
+  } catch (err) {
+    console.error('[/api/qeb/tickets/:id]', err)
+    return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
 qebRouter.get('/tickets/by-categoria', async (_req: Request, res: Response) => {
   const pool = getQebPool()!
   try {
