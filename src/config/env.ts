@@ -27,6 +27,12 @@ export const env = {
   DO_API_TOKEN: process.env.DO_API_TOKEN,
   DO_APP_ID_QEB_BACK: process.env.DO_APP_ID_QEB_BACK, // UUID del App qeb-back en DO
   DO_DB_CLUSTER_ID: process.env.DO_DB_CLUSTER_ID,     // UUID del cluster qeb-mysql-prod en DO
+
+  // DigitalOcean Spaces (bucket qeb-media-main), S3-compatible.
+  DO_SPACES_KEY: process.env.DO_SPACES_KEY,
+  DO_SPACES_SECRET: process.env.DO_SPACES_SECRET,
+  DO_SPACES_BUCKET: process.env.DO_SPACES_BUCKET ?? 'qeb-media-main',
+  DO_SPACES_REGION: process.env.DO_SPACES_REGION ?? 'sfo3',
 }
 
 export const isProd = env.NODE_ENV === 'production'

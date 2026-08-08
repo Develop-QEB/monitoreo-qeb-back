@@ -20,6 +20,7 @@ import { streamAndCapture } from '../lib/logsCapture'
 import { verifyJwt } from '../lib/jwt'
 import { prisma } from '../lib/prisma'
 import { bgCapture } from '../lib/backgroundCapture'
+import { doSpacesConfigured, getSpacesSummary } from '../lib/doSpaces'
 
 export const infraRouter: Router = Router()
 
@@ -312,6 +313,23 @@ infraRouter.get('/do/database', async (_req: Request, res: Response) => {
   }
 })
 
+// ------- DIGITALOCEAN SPACES (qeb-media-main) -------
+
+infraRouter.get('/spaces/summary', async (_req: Request, res: Response) => {
+  if (!doSpacesConfigured()) {
+    return res.json({
+      configured: false,
+      reason: 'faltan DO_SPACES_KEY / DO_SPACES_SECRET / DO_SPACES_BUCKET',
+    })
+  }
+  try {
+    const summary = await getSpacesSummary()
+    return res.json({ configured: true, ...summary })
+  } catch (err) {
+    return res.status(500).json({ configured: true, error: (err as Error).message })
+  }
+})
+
 // ------- CONFIG SUMMARY -------
 // Endpoint para saber qué integraciones están activas desde el front.
 
@@ -321,5 +339,6 @@ infraRouter.get('/config', (_req: Request, res: Response) => {
     doApi: doApiConfigured(),
     doApp: doAppConfigured(),
     doDb: doDbConfigured(),
+    doSpaces: doSpacesConfigured(),
   })
 })
