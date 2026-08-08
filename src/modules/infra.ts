@@ -9,9 +9,12 @@ import {
   getDoAppDeployments,
   getDoAppInfo,
   getDoDbCluster,
+  getDoAppMetrics,
+  fetchDoAppRuntimeLogs,
   doApiConfigured,
   doAppConfigured,
   doDbConfigured,
+  type AppMetricName,
 } from '../lib/doApi'
 
 export const infraRouter: Router = Router()
@@ -76,6 +79,48 @@ infraRouter.get('/do/app/deployments', async (_req: Request, res: Response) => {
   try {
     const deployments = await getDoAppDeployments(10)
     return res.json({ configured: true, deployments })
+  } catch (err) {
+    return res.status(500).json({ configured: true, error: (err as Error).message })
+  }
+})
+
+infraRouter.get('/do/app/metrics', async (req: Request, res: Response) => {
+  if (!doAppConfigured()) {
+    return res.json({
+      configured: false,
+      reason: 'faltan DO_API_TOKEN o DO_APP_ID_QEB_BACK',
+      series: [],
+    })
+  }
+  const metric = String(req.query.metric ?? 'cpu_percentage') as AppMetricName
+  const validMetrics: AppMetricName[] = ['cpu_percentage', 'memory_percentage', 'restart_count']
+  if (!validMetrics.includes(metric)) {
+    return res.status(400).json({ error: 'metric inválida' })
+  }
+  const hours = Math.min(Math.max(parseInt(String(req.query.hours ?? '1'), 10) || 1, 1), 24)
+  try {
+    const series = await getDoAppMetrics(metric, hours)
+    return res.json({ configured: true, metric, hours, series })
+  } catch (err) {
+    return res.status(500).json({ configured: true, error: (err as Error).message })
+  }
+})
+
+infraRouter.get('/do/app/logs', async (req: Request, res: Response) => {
+  if (!doAppConfigured()) {
+    return res.json({
+      configured: false,
+      reason: 'faltan DO_API_TOKEN o DO_APP_ID_QEB_BACK',
+      lines: [],
+    })
+  }
+  const maxLines = Math.min(
+    Math.max(parseInt(String(req.query.max ?? '300'), 10) || 300, 20),
+    1000,
+  )
+  try {
+    const lines = await fetchDoAppRuntimeLogs(maxLines)
+    return res.json({ configured: true, count: lines.length, lines })
   } catch (err) {
     return res.status(500).json({ configured: true, error: (err as Error).message })
   }
