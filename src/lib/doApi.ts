@@ -121,6 +121,9 @@ export interface AppMetricSeries {
 // ------- App Runtime Logs -------
 
 interface AppLogsUrlsResponse {
+  // DO puede devolver `url` (un solo string firmado) o `historic_urls` (array),
+  // dependiendo del endpoint. Manejamos ambos.
+  url?: string
   historic_urls?: string[]
   live_url?: string
 }
@@ -141,7 +144,10 @@ async function tryLogsEndpoint(path: string, debug: LogsFetchDebug): Promise<str
   debug.triedUrls.push(path)
   try {
     const meta = (await doFetch(path)) as AppLogsUrlsResponse
-    return meta.historic_urls ?? []
+    // Aceptar tanto `url` (single) como `historic_urls` (array)
+    if (meta.historic_urls?.length) return meta.historic_urls
+    if (meta.url) return [meta.url]
+    return []
   } catch (e) {
     debug.errors.push(`${path} → ${(e as Error).message.slice(0, 100)}`)
     return []
