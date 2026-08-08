@@ -336,6 +336,56 @@ interface UsuarioRow extends RowDataPacket {
   updated_at: Date | string | null
 }
 
+// ============================================================
+// índices críticos (verificación estática)
+// ============================================================
+
+interface IndexRow extends RowDataPacket {
+  TABLE_NAME: string
+  INDEX_NAME: string
+}
+
+// Los 7 índices que fase de rendimiento del dashboard necesita.
+// Ver back-qeb/scripts/add_idx_dashboard_perf.cjs
+const CRITICAL_INDEXES: { table: string; name: string }[] = [
+  { table: 'inventarios', name: 'idx_inv_estado' },
+  { table: 'inventarios', name: 'idx_inv_plaza' },
+  { table: 'inventarios', name: 'idx_inv_mueble' },
+  { table: 'inventarios', name: 'idx_inv_nse' },
+  { table: 'inventarios', name: 'idx_inv_tipo' },
+  { table: 'inventarios', name: 'idx_inv_estatus' },
+  { table: 'reservas',    name: 'idx_rsv_calendario' },
+]
+
+qebRouter.get('/indices', async (_req: Request, res: Response) => {
+  const pool = getQebPool()!
+  try {
+    const [rows] = await pool.query<IndexRow[]>(
+      `SELECT DISTINCT TABLE_NAME, INDEX_NAME
+       FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME IN ('inventarios', 'reservas')
+         AND (INDEX_NAME LIKE 'idx_inv_%' OR INDEX_NAME = 'idx_rsv_calendario')`,
+    )
+    const foundSet = new Set(rows.map((r) => `${r.TABLE_NAME}::${r.INDEX_NAME}`))
+    const indexes = CRITICAL_INDEXES.map((idx) => ({
+      table: idx.table,
+      name: idx.name,
+      present: foundSet.has(`${idx.table}::${idx.name}`),
+    }))
+    const allPresent = indexes.every((i) => i.present)
+    return res.json({
+      expected: CRITICAL_INDEXES.length,
+      found: indexes.filter((i) => i.present).length,
+      allPresent,
+      indexes,
+    })
+  } catch (err) {
+    console.error('[/api/qeb/indices]', err)
+    return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
 qebRouter.get('/actividad/usuarios', async (req: Request, res: Response) => {
   const pool = getQebPool()!
   const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
