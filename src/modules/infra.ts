@@ -119,8 +119,8 @@ infraRouter.get('/do/app/logs', async (req: Request, res: Response) => {
     1000,
   )
   try {
-    const lines = await fetchDoAppRuntimeLogs(maxLines)
-    return res.json({ configured: true, count: lines.length, lines })
+    const { lines, debug } = await fetchDoAppRuntimeLogs(maxLines)
+    return res.json({ configured: true, count: lines.length, lines, debug })
   } catch (err) {
     return res.status(500).json({ configured: true, error: (err as Error).message })
   }

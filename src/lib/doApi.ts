@@ -130,30 +130,98 @@ export interface AppLogLine {
   raw: string
 }
 
-export async function fetchDoAppRuntimeLogs(maxLines = 300): Promise<AppLogLine[]> {
-  // 1) Pedir a DO las URLs firmadas de los logs
-  const meta = (await doFetch(
-    `/apps/${env.DO_APP_ID_QEB_BACK!}/logs?type=RUN&follow=false`,
-  )) as AppLogsUrlsResponse
+export interface LogsFetchDebug {
+  triedUrls: string[]
+  historicCount: number
+  fetchedBytes: number
+  errors: string[]
+}
 
-  if (!meta.historic_urls?.length) return []
+async function tryLogsEndpoint(path: string, debug: LogsFetchDebug): Promise<string[]> {
+  debug.triedUrls.push(path)
+  try {
+    const meta = (await doFetch(path)) as AppLogsUrlsResponse
+    return meta.historic_urls ?? []
+  } catch (e) {
+    debug.errors.push(`${path} → ${(e as Error).message.slice(0, 100)}`)
+    return []
+  }
+}
 
-  // 2) Bajar los últimos 2 chunks (por si el actual está vacio)
-  const urls = meta.historic_urls.slice(-2)
+export async function fetchDoAppRuntimeLogs(
+  maxLines = 300,
+): Promise<{ lines: AppLogLine[]; debug: LogsFetchDebug }> {
+  const debug: LogsFetchDebug = {
+    triedUrls: [],
+    historicCount: 0,
+    fetchedBytes: 0,
+    errors: [],
+  }
+
+  // Necesitamos el deployment activo y el component name para máxima cobertura
+  let deploymentId: string | undefined
+  let componentName: string | undefined
+  try {
+    const appInfo = await getDoAppInfo()
+    deploymentId = appInfo.active_deployment?.id
+    componentName = appInfo.spec?.name
+  } catch (e) {
+    debug.errors.push(`getDoAppInfo → ${(e as Error).message.slice(0, 100)}`)
+  }
+
+  const appId = env.DO_APP_ID_QEB_BACK!
+  let urls: string[] = []
+
+  // 1) Intento con deployment + component (más específico, más historia)
+  if (deploymentId && componentName) {
+    urls = await tryLogsEndpoint(
+      `/apps/${appId}/deployments/${deploymentId}/components/${componentName}/logs?type=RUN`,
+      debug,
+    )
+  }
+  // 2) Fallback deployment sin component
+  if (!urls.length && deploymentId) {
+    urls = await tryLogsEndpoint(
+      `/apps/${appId}/deployments/${deploymentId}/logs?type=RUN`,
+      debug,
+    )
+  }
+  // 3) Fallback app-level con component
+  if (!urls.length && componentName) {
+    urls = await tryLogsEndpoint(
+      `/apps/${appId}/components/${componentName}/logs?type=RUN`,
+      debug,
+    )
+  }
+  // 4) Fallback más amplio
+  if (!urls.length) {
+    urls = await tryLogsEndpoint(`/apps/${appId}/logs?type=RUN`, debug)
+  }
+
+  debug.historicCount = urls.length
+  if (!urls.length) return { lines: [], debug }
+
+  // Bajar los últimos 3 chunks
   const bodies = await Promise.all(
-    urls.map(async (u) => {
+    urls.slice(-3).map(async (u) => {
       try {
         const r = await fetch(u)
-        if (!r.ok) return ''
-        return await r.text()
-      } catch {
+        if (!r.ok) {
+          debug.errors.push(`fetch ${r.status} on log chunk`)
+          return ''
+        }
+        const t = await r.text()
+        debug.fetchedBytes += t.length
+        return t
+      } catch (e) {
+        debug.errors.push(`fetch fail: ${(e as Error).message.slice(0, 80)}`)
         return ''
       }
     }),
   )
   const full = bodies.join('\n')
 
-  // 3) Parsear línea por línea con timestamp
+  // Parsear timestamp ISO al principio de cada línea
   const tsRegex = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(.*)$/
   const lines = full
     .split('\n')
@@ -163,8 +231,7 @@ export async function fetchDoAppRuntimeLogs(maxLines = 300): Promise<AppLogLine[
     })
     .filter((l) => l.raw.trim().length > 0)
 
-  // 4) Últimas maxLines
-  return lines.slice(-maxLines)
+  return { lines: lines.slice(-maxLines), debug }
 }
 
 export async function getDoAppMetrics(
