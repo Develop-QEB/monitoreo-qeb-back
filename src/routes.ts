@@ -5,6 +5,7 @@ import { auditRouter } from './modules/audit'
 import { qebRouter } from './modules/qeb'
 import { infraRouter } from './modules/infra'
 import { monitorFrontendRouter } from './modules/monitorFrontend'
+import { vpsRouter } from './modules/vps'
 
 export const apiRouter: Router = Router()
 
@@ -14,3 +15,4 @@ apiRouter.use('/audit', auditRouter)
 apiRouter.use('/qeb', qebRouter)
 apiRouter.use('/infra', infraRouter)
 apiRouter.use('/monitor', monitorFrontendRouter)
+apiRouter.use('/vps', vpsRouter)

@@ -28,6 +28,10 @@ export const env = {
   DO_APP_ID_QEB_BACK: process.env.DO_APP_ID_QEB_BACK, // UUID del App qeb-back en DO
   DO_DB_CLUSTER_ID: process.env.DO_DB_CLUSTER_ID,     // UUID del cluster qeb-mysql-prod en DO
 
+  // VPS (tab "vps"): secreto compartido con el agente PowerShell que empuja
+  // los logs. Si falta, /api/vps/* responde configured=false.
+  VPS_LOG_SECRET: process.env.VPS_LOG_SECRET,
+
   // DigitalOcean Spaces (bucket qeb-media-main), S3-compatible.
   DO_SPACES_KEY: process.env.DO_SPACES_KEY,
   DO_SPACES_SECRET: process.env.DO_SPACES_SECRET,
