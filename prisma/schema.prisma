@@ -98,3 +98,19 @@ model QueryStat {
   @@index([updatedAt])
   @@map("monitor_query_stats")
 }
+
+// Ping periodico a targets (front qeb, back qeb, mysql prod). Cada ping guarda
+// timestamp + ms de respuesta + status. Con esto se calcula uptime% y percentiles.
+model UptimePing {
+  id         String   @id @default(cuid())
+  ts         DateTime @default(now())
+  target     String   @db.VarChar(30) // 'front-qeb' | 'back-qeb' | 'db-qeb'
+  kind       String   @db.VarChar(10) // 'http' | 'tcp'
+  ok         Boolean
+  responseMs Int
+  status     Int? // HTTP status (solo kind=http)
+  error      String?  @db.VarChar(255)
+
+  @@index([target, ts])
+  @@map("monitor_uptime_pings")
+}

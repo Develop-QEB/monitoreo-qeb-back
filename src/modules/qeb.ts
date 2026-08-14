@@ -378,31 +378,6 @@ qebRouter.get('/actividad/stats', async (_req: Request, res: Response) => {
   }
 })
 
-interface SessionLockRow extends RowDataPacket {
-  id: number
-  module_name: string
-  user_id: number | null
-  username: string | null
-  locked_at: Date | string
-}
-
-qebRouter.get('/actividad/sesiones', async (_req: Request, res: Response) => {
-  const pool = getQebPool()!
-  try {
-    const [rows] = await pool.query<SessionLockRow[]>(
-      `SELECT id, module_name, user_id, username, locked_at
-       FROM session_locks
-       WHERE locked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-       ORDER BY locked_at DESC
-       LIMIT 50`,
-    )
-    return res.json({ sesiones: rows })
-  } catch (err) {
-    console.error('[/api/qeb/actividad/sesiones]', err)
-    return res.status(500).json({ error: (err as Error).message })
-  }
-})
-
 interface UsuarioRow extends RowDataPacket {
   id: number
   nombre: string
@@ -584,7 +559,9 @@ qebRouter.get('/indices', async (_req: Request, res: Response) => {
 
 qebRouter.get('/actividad/usuarios', async (req: Request, res: Response) => {
   const pool = getQebPool()!
-  const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
+  // Default 500 (arriba de los ~109 activos actuales) para que el listado no
+  // se corte y coincida con la KPI "activos" del /actividad/stats.
+  const limit = Math.min(parseInt(String(req.query.limit ?? '500'), 10) || 500, 500)
   try {
     const [rows] = await pool.query<UsuarioRow[]>(
       `SELECT id, nombre, correo_electronico, area, puesto, user_role,

@@ -21,6 +21,7 @@ import { verifyJwt } from '../lib/jwt'
 import { prisma } from '../lib/prisma'
 import { bgCapture } from '../lib/backgroundCapture'
 import { doSpacesConfigured, getSpacesSummary } from '../lib/doSpaces'
+import { estimateAppPlan, estimateDbPlan } from '../lib/doPricing'
 
 export const infraRouter: Router = Router()
 
@@ -67,7 +68,30 @@ infraRouter.get('/do/app', async (_req: Request, res: Response) => {
   }
   try {
     const app = await getDoAppInfo()
-    return res.json({ configured: true, app })
+    // DO expone el precio real via spec.services[].instance_size_slug (por servicio),
+    // no via tier_slug root (que solo dice familia como "professional"). Sumamos todos
+    // los servicios definidos en la spec.
+    const services = ((app as unknown as {
+      spec?: { services?: { instance_size_slug?: string; instance_count?: number }[] }
+    })?.spec?.services) ?? []
+    let plan
+    if (services.length === 0) {
+      plan = estimateAppPlan(null, 1, app?.tier_slug)
+    } else if (services.length === 1) {
+      plan = estimateAppPlan(services[0].instance_size_slug, services[0].instance_count ?? 1, app?.tier_slug)
+    } else {
+      // App con varios servicios: sumar cada uno.
+      const parts = services.map((s) =>
+        estimateAppPlan(s.instance_size_slug, s.instance_count ?? 1, app?.tier_slug),
+      )
+      const total = parts.reduce((acc, p) => acc + (p.usdPerMonth ?? 0), 0)
+      plan = {
+        slug: parts.map((p) => p.slug).join(' + '),
+        usdPerMonth: parts.every((p) => p.known) ? total : null,
+        known: parts.every((p) => p.known),
+      }
+    }
+    return res.json({ configured: true, app, plan })
   } catch (err) {
     return res.status(500).json({ configured: true, error: (err as Error).message })
   }
@@ -307,7 +331,8 @@ infraRouter.get('/do/database', async (_req: Request, res: Response) => {
   }
   try {
     const cluster = await getDoDbCluster()
-    return res.json({ configured: true, cluster })
+    const plan = estimateDbPlan(cluster?.size, cluster?.num_nodes ?? 1)
+    return res.json({ configured: true, cluster, plan })
   } catch (err) {
     return res.status(500).json({ configured: true, error: (err as Error).message })
   }
@@ -328,6 +353,94 @@ infraRouter.get('/spaces/summary', async (_req: Request, res: Response) => {
   } catch (err) {
     return res.status(500).json({ configured: true, error: (err as Error).message })
   }
+})
+
+// ------- UPTIME (pings propios cada 60s desde el back) -------
+// NUNCA devolvemos hostnames / URLs de los targets: el front solo necesita
+// saber `target` ('front-qeb' | 'back-qeb' | 'db-qeb'), no la URL real.
+
+const UPTIME_TARGETS = ['front-qeb', 'back-qeb', 'db-qeb'] as const
+type UptimeTarget = (typeof UPTIME_TARGETS)[number]
+const TARGET_LABEL: Record<UptimeTarget, string> = {
+  'front-qeb': 'frontend qeb',
+  'back-qeb': 'backend qeb',
+  'db-qeb': 'database qeb',
+}
+
+function pct(nOk: number, total: number): number {
+  if (total === 0) return 0
+  return Math.round((nOk / total) * 10000) / 100
+}
+
+function percentile(values: number[], p: number): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))
+  return sorted[idx]
+}
+
+infraRouter.get('/uptime/summary', async (req: Request, res: Response) => {
+  const hours = Math.max(1, Math.min(168, parseInt(String(req.query.hours ?? '24'), 10) || 24))
+  const since = new Date(Date.now() - hours * 60 * 60_000)
+
+  const rows = await prisma.uptimePing.findMany({
+    where: { ts: { gte: since } },
+    select: { target: true, ok: true, responseMs: true, ts: true, status: true },
+  })
+  const byTarget: Record<string, typeof rows> = {}
+  for (const r of rows) {
+    ;(byTarget[r.target] ??= []).push(r)
+  }
+
+  const targets = UPTIME_TARGETS.map((t) => {
+    const list = byTarget[t] ?? []
+    const okList = list.filter((r) => r.ok)
+    const responseMs = okList.map((r) => r.responseMs)
+    const avg =
+      responseMs.length === 0
+        ? null
+        : Math.round(responseMs.reduce((a, b) => a + b, 0) / responseMs.length)
+    const last = list[list.length - 1] ?? null
+    return {
+      key: t,
+      name: TARGET_LABEL[t],
+      count: list.length,
+      okCount: okList.length,
+      uptimePct: pct(okList.length, list.length),
+      avgMs: avg,
+      p95Ms: percentile(responseMs, 95),
+      lastPingAt: last ? last.ts.toISOString() : null,
+      lastOk: last ? last.ok : null,
+      lastStatus: last?.status ?? null,
+    }
+  })
+
+  return res.json({ hours, targets })
+})
+
+infraRouter.get('/uptime/series', async (req: Request, res: Response) => {
+  const target = String(req.query.target ?? '')
+  if (!(UPTIME_TARGETS as readonly string[]).includes(target)) {
+    return res.status(400).json({ error: 'target invalido' })
+  }
+  const hours = Math.max(1, Math.min(168, parseInt(String(req.query.hours ?? '24'), 10) || 24))
+  const since = new Date(Date.now() - hours * 60 * 60_000)
+
+  const rows = await prisma.uptimePing.findMany({
+    where: { target, ts: { gte: since } },
+    orderBy: { ts: 'asc' },
+    select: { ts: true, ok: true, responseMs: true, status: true },
+  })
+  return res.json({
+    target,
+    hours,
+    points: rows.map((r) => ({
+      ts: r.ts.toISOString(),
+      ok: r.ok,
+      responseMs: r.responseMs,
+      status: r.status,
+    })),
+  })
 })
 
 // ------- CONFIG SUMMARY -------

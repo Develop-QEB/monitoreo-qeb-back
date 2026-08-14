@@ -6,6 +6,7 @@ import { env, isProd } from './config/env'
 import { apiRouter } from './routes'
 import { errorHandler, notFound } from './middleware/error'
 import { bgCapture } from './lib/backgroundCapture'
+import { startUptimeMonitor, stopUptimeMonitor } from './lib/uptimeMonitor'
 
 const app = express()
 
@@ -54,7 +55,15 @@ app.listen(env.PORT, () => {
   console.log(`[monitoreo-qeb-back] listening on http://localhost:${env.PORT} (${env.NODE_ENV})`)
   // Captura de logs 24/7 (mientras el proceso esté vivo).
   bgCapture.start()
+  // Pinga los 3 targets (front qeb, back qeb via DO, mysql prod) cada 60s.
+  startUptimeMonitor()
 })
 
-process.on('SIGTERM', () => bgCapture.stop())
-process.on('SIGINT', () => bgCapture.stop())
+process.on('SIGTERM', () => {
+  bgCapture.stop()
+  stopUptimeMonitor()
+})
+process.on('SIGINT', () => {
+  bgCapture.stop()
+  stopUptimeMonitor()
+})

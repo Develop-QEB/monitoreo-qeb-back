@@ -35,19 +35,61 @@ function parseLine(raw: string): CapturedLine | null {
   return { ts, msg, level: detectLevel(msg) }
 }
 
-async function persistLine(line: CapturedLine): Promise<void> {
+// ---- BATCH BUFFER ----
+// Antes se hacia 1 INSERT por linea con fire-and-forget. Con el back de QEB
+// generando 200-300 lineas/min y latencia local-a-DO de ~150ms, el pool de
+// Prisma (13 conexiones) se llenaba en segundos y todo lo demas hacia timeout
+// (incluidos los inserts del uptime monitor). Ahora batcheamos:
+// flush cada 2s o al llegar a 100 lineas, en un solo createMany.
+
+const BATCH_MAX = 100
+const BATCH_INTERVAL_MS = 2000
+
+const buffer: {
+  ts: Date
+  source: string
+  level: string
+  msg: string
+}[] = []
+let flushTimer: NodeJS.Timeout | null = null
+let flushInFlight = false
+
+async function flush(): Promise<void> {
+  if (flushInFlight) return
+  if (buffer.length === 0) return
+  flushInFlight = true
+  const batch = buffer.splice(0, BATCH_MAX)
   try {
-    await prisma.logEntry.create({
-      data: {
-        ts: line.ts ? new Date(line.ts) : new Date(),
-        source: 'qeb-back',
-        level: line.level,
-        msg: line.msg.slice(0, 65000),
-      },
-    })
+    await prisma.logEntry.createMany({ data: batch })
   } catch (err) {
-    // best-effort: si falla la escritura, no rompemos el stream
-    console.error('[logsCapture] persist fail:', (err as Error).message)
+    console.error('[logsCapture] batch persist fail:', (err as Error).message)
+    // No re-inyectamos las lineas: si la DB esta caida, mejor dropear que crecer
+    // el buffer sin limite. En prod la DB responde bien.
+  } finally {
+    flushInFlight = false
+  }
+}
+
+function scheduleFlush(): void {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    void flush()
+  }, BATCH_INTERVAL_MS)
+}
+
+function persistLine(line: CapturedLine): void {
+  buffer.push({
+    ts: line.ts ? new Date(line.ts) : new Date(),
+    source: 'qeb-back',
+    level: line.level,
+    msg: line.msg.slice(0, 65000),
+  })
+  // Si el buffer se llena mucho, flusheamos ya sin esperar el timer.
+  if (buffer.length >= BATCH_MAX) {
+    void flush()
+  } else {
+    scheduleFlush()
   }
 }
 
@@ -82,8 +124,8 @@ export async function* streamAndCapture(
         if (!raw.trim()) continue
         const line = parseLine(raw)
         if (!line) continue
-        // fire-and-forget insert (no bloquea el stream)
-        void persistLine(line)
+        // Solo pusheamos al buffer batcheado (sin await, sin promesas).
+        persistLine(line)
         yield line
       }
     }
