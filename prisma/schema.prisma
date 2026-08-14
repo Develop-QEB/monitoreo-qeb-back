@@ -114,3 +114,16 @@ model UptimePing {
   @@index([target, ts])
   @@map("monitor_uptime_pings")
 }
+
+// Snapshot cada 5min de CPU y RAM del app qeb-back en DO. DO monitoring solo
+// retiene 1h; con esta tabla tenemos 30 dias para investigar incidentes.
+// Retencion: rolling delete de filas > 30 dias al insertar.
+model MetricSnapshot {
+  id       String   @id @default(cuid())
+  ts       DateTime @default(now())
+  metric   String   @db.VarChar(20) // 'cpu' | 'ram'
+  valuePct Float
+
+  @@index([metric, ts])
+  @@map("monitor_metric_snapshots")
+}

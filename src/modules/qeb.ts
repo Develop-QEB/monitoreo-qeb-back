@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import type { RowDataPacket } from 'mysql2'
 import { getQebPool, isQebConfigured } from '../lib/qebDb'
 import { requireAuth } from '../middleware/auth'
+import { maskDevName, maskDevById, ensureTeamAliasFresh } from '../lib/qebTeamAlias'
 
 export const qebRouter: Router = Router()
 
@@ -133,6 +134,7 @@ qebRouter.get('/tickets', async (req: Request, res: Response) => {
   const where = conds.length ? 'WHERE ' + conds.join(' AND ') : ''
   params.push(limit)
   try {
+    await ensureTeamAliasFresh()
     const [rows] = await pool.query<TicketRow[]>(
       `SELECT id, titulo, status, prioridad, categoria, area,
               usuario_nombre, usuario_email, respondido_por,
@@ -143,7 +145,13 @@ qebRouter.get('/tickets', async (req: Request, res: Response) => {
        LIMIT ?`,
       params,
     )
-    return res.json({ tickets: rows })
+    // Enmascarar quien responde el ticket cuando es del team DEV.
+    // No enmascaramos usuario_nombre porque es el que ABRIO el ticket (cliente).
+    const masked = rows.map((r) => ({
+      ...r,
+      respondido_por: maskDevName(r.id, r.respondido_por),
+    }))
+    return res.json({ tickets: masked })
   } catch (err) {
     console.error('[/api/qeb/tickets]', err)
     return res.status(500).json({ error: (err as Error).message })
@@ -238,6 +246,7 @@ qebRouter.get('/tickets/:id', async (req: Request<{ id: string }>, res: Response
       [id],
     )
     if (ticketRows.length === 0) return res.status(404).json({ error: 'ticket no existe' })
+    await ensureTeamAliasFresh()
 
     const [mensajes] = await pool.query<TicketMessageRow[]>(
       `SELECT id, ticket_id, usuario_id, usuario_nombre, mensaje,
@@ -256,10 +265,27 @@ qebRouter.get('/tickets/:id', async (req: Request<{ id: string }>, res: Response
       [id],
     )
 
+    // Enmascarar TODOS los campos donde aparece nombre de alguien del team DEV,
+    // pero conservar usuario_nombre del ticket (quien LO ABRIO = cliente).
+    const t = ticketRows[0]
+    const maskedTicket = {
+      ...t,
+      respondido_por: maskDevName(t.id, t.respondido_por),
+      status_cambiado_por: maskDevName(t.id, t.status_cambiado_por),
+    }
+    const maskedMensajes = mensajes.map((m) => ({
+      ...m,
+      usuario_nombre: maskDevById(m.ticket_id, m.usuario_id, m.usuario_nombre),
+    }))
+    const maskedChat = chat.map((m) => ({
+      ...m,
+      usuario_nombre: maskDevById(m.ticket_id, m.usuario_id, m.usuario_nombre),
+    }))
+
     return res.json({
-      ticket: ticketRows[0],
-      mensajes,
-      chat,
+      ticket: maskedTicket,
+      mensajes: maskedMensajes,
+      chat: maskedChat,
     })
   } catch (err) {
     console.error('[/api/qeb/tickets/:id]', err)
@@ -576,5 +602,73 @@ qebRouter.get('/actividad/usuarios', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[/api/qeb/actividad/usuarios]', err)
     return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// ============================================================
+// Slow queries via performance_schema
+// ============================================================
+// events_statements_summary_by_digest agrupa queries por "digest" (SQL
+// normalizado). Sin habilitar slow_log. Fuente clave para prevenir incidentes
+// como el CPU 100% que ya tuvieron.
+
+interface SlowQueryRow extends RowDataPacket {
+  digest: string
+  digest_text: string
+  count_star: number
+  avg_ms: number
+  max_ms: number
+  sum_ms: number
+  rows_examined_avg: number
+  rows_sent_avg: number
+  last_seen: Date | string | null
+  first_seen: Date | string | null
+}
+
+qebRouter.get('/slow-queries', async (req: Request, res: Response) => {
+  const pool = getQebPool()!
+  const limit = Math.max(5, Math.min(100, parseInt(String(req.query.limit ?? '20'), 10) || 20))
+  const minAvgMs = Math.max(0, parseInt(String(req.query.minAvgMs ?? '0'), 10) || 0)
+  const orderBy = String(req.query.orderBy ?? 'sum') // 'sum' | 'avg' | 'count' | 'max'
+  const orderCol =
+    orderBy === 'avg'
+      ? 'avg_ms'
+      : orderBy === 'count'
+        ? 'count_star'
+        : orderBy === 'max'
+          ? 'max_ms'
+          : 'sum_ms'
+  try {
+    const [rows] = await pool.query<SlowQueryRow[]>(
+      `SELECT
+         DIGEST as digest,
+         DIGEST_TEXT as digest_text,
+         COUNT_STAR as count_star,
+         ROUND(AVG_TIMER_WAIT / 1000000000, 2) as avg_ms,
+         ROUND(MAX_TIMER_WAIT / 1000000000, 2) as max_ms,
+         ROUND(SUM_TIMER_WAIT / 1000000000, 2) as sum_ms,
+         ROUND(SUM_ROWS_EXAMINED / GREATEST(COUNT_STAR, 1), 0) as rows_examined_avg,
+         ROUND(SUM_ROWS_SENT / GREATEST(COUNT_STAR, 1), 0) as rows_sent_avg,
+         LAST_SEEN as last_seen,
+         FIRST_SEEN as first_seen
+       FROM performance_schema.events_statements_summary_by_digest
+       WHERE SCHEMA_NAME = DATABASE()
+         AND (AVG_TIMER_WAIT / 1000000000) >= ?
+       ORDER BY ${orderCol} DESC
+       LIMIT ?`,
+      [minAvgMs, limit],
+    )
+    return res.json({ orderBy, minAvgMs, queries: rows })
+  } catch (err) {
+    // Mensaje amigable si monitor_readonly no tiene grant a performance_schema.
+    const msg = (err as Error).message
+    if (msg.includes('SELECT command denied') || msg.includes("Access denied")) {
+      return res.status(403).json({
+        error:
+          'monitor_readonly no tiene permiso a performance_schema. Ejecutar: GRANT SELECT ON performance_schema.* TO monitor_readonly',
+      })
+    }
+    console.error('[/api/qeb/slow-queries]', err)
+    return res.status(500).json({ error: msg })
   }
 })

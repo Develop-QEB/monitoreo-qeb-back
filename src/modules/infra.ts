@@ -355,6 +355,36 @@ infraRouter.get('/spaces/summary', async (_req: Request, res: Response) => {
   }
 })
 
+// ------- HISTORICO DE CPU/RAM (snapshot cada 5min desde el back) -------
+// DO monitoring solo retiene 1h. Con esta tabla tenemos 30 dias. Sirve para
+// investigar incidentes pasados ("hace 3 dias a las 4pm hubo un pico de CPU").
+
+infraRouter.get('/do/app/metrics/history', async (req: Request, res: Response) => {
+  const metric = String(req.query.metric ?? 'cpu')
+  if (metric !== 'cpu' && metric !== 'ram') {
+    return res.status(400).json({ error: 'metric debe ser cpu o ram' })
+  }
+  // Rango 1h..720h (30 dias). Default 24h.
+  const hours = Math.max(1, Math.min(720, parseInt(String(req.query.hours ?? '24'), 10) || 24))
+  const since = new Date(Date.now() - hours * 60 * 60_000)
+
+  const rows = await prisma.metricSnapshot.findMany({
+    where: { metric, ts: { gte: since } },
+    orderBy: { ts: 'asc' },
+    select: { ts: true, valuePct: true },
+  })
+  const values = rows.map((r) => r.valuePct)
+  return res.json({
+    metric,
+    hours,
+    count: rows.length,
+    avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
+    peak: values.length ? Math.max(...values) : null,
+    latest: values.length ? values[values.length - 1] : null,
+    points: rows.map((r) => ({ ts: r.ts.toISOString(), value: r.valuePct })),
+  })
+})
+
 // ------- UPTIME (pings propios cada 60s desde el back) -------
 // NUNCA devolvemos hostnames / URLs de los targets: el front solo necesita
 // saber `target` ('front-qeb' | 'back-qeb' | 'db-qeb'), no la URL real.

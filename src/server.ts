@@ -7,6 +7,8 @@ import { apiRouter } from './routes'
 import { errorHandler, notFound } from './middleware/error'
 import { bgCapture } from './lib/backgroundCapture'
 import { startUptimeMonitor, stopUptimeMonitor } from './lib/uptimeMonitor'
+import { startMetricsSnapshot, stopMetricsSnapshot } from './lib/metricsSnapshot'
+import { warmQebTeamAlias } from './lib/qebTeamAlias'
 
 const app = express()
 
@@ -57,13 +59,19 @@ app.listen(env.PORT, () => {
   bgCapture.start()
   // Pinga los 3 targets (front qeb, back qeb via DO, mysql prod) cada 60s.
   startUptimeMonitor()
+  // Snapshot de CPU/RAM del app en DO cada 5min, para historia larga.
+  startMetricsSnapshot()
+  // Precarga el cache de team DEV para masking de tickets.
+  warmQebTeamAlias()
 })
 
 process.on('SIGTERM', () => {
   bgCapture.stop()
   stopUptimeMonitor()
+  stopMetricsSnapshot()
 })
 process.on('SIGINT', () => {
   bgCapture.stop()
   stopUptimeMonitor()
+  stopMetricsSnapshot()
 })
