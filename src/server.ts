@@ -8,6 +8,7 @@ import { errorHandler, notFound } from './middleware/error'
 import { bgCapture } from './lib/backgroundCapture'
 import { startUptimeMonitor, stopUptimeMonitor } from './lib/uptimeMonitor'
 import { startMetricsSnapshot, stopMetricsSnapshot } from './lib/metricsSnapshot'
+import { startLogsRetention, stopLogsRetention } from './lib/logsRetention'
 import { warmQebTeamAlias } from './lib/qebTeamAlias'
 
 const app = express()
@@ -61,6 +62,8 @@ app.listen(env.PORT, () => {
   startUptimeMonitor()
   // Snapshot de CPU/RAM del app en DO cada 5min, para historia larga.
   startMetricsSnapshot()
+  // Borra logs de mas de 15 dias cada hora (retencion rotativa).
+  startLogsRetention()
   // Precarga el cache de team DEV para masking de tickets.
   warmQebTeamAlias()
 })
@@ -69,9 +72,11 @@ process.on('SIGTERM', () => {
   bgCapture.stop()
   stopUptimeMonitor()
   stopMetricsSnapshot()
+  stopLogsRetention()
 })
 process.on('SIGINT', () => {
   bgCapture.stop()
   stopUptimeMonitor()
   stopMetricsSnapshot()
+  stopLogsRetention()
 })
