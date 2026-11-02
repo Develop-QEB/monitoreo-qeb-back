@@ -21,10 +21,11 @@ export interface DropletSource {
   pm2: string // nombre del proceso en pm2 (= nombre del archivo de log)
 }
 
-// "qeb-api" = el back principal de QEB en el droplet (release, api-release.qeb.mx).
+// "qeb-api" = el proxy SAP (qeb-sap-proxy, sap.qeb.mx): el que saca articulos/CUIC
+// de SAP. (El back principal de release es otro proceso; se puede agregar aparte.)
 export const DROPLET_SOURCES: DropletSource[] = [
   { key: 'autosync', label: 'autosync', pm2: 'qeb-sync' },
-  { key: 'qeb-api', label: 'qeb-api', pm2: 'qeb-back-release' },
+  { key: 'qeb-api', label: 'qeb-api', pm2: 'qeb-sap-proxy' },
 ]
 
 const PM2_LOG_DIR = process.env.PM2_LOG_DIR || '/root/.pm2/logs'
