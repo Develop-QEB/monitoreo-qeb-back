@@ -6,6 +6,7 @@ import { qebRouter } from './modules/qeb'
 import { infraRouter } from './modules/infra'
 import { monitorFrontendRouter } from './modules/monitorFrontend'
 import { vpsRouter } from './modules/vps'
+import { dropletRouter } from './modules/droplet'
 
 export const apiRouter: Router = Router()
 
@@ -16,3 +17,4 @@ apiRouter.use('/qeb', qebRouter)
 apiRouter.use('/infra', infraRouter)
 apiRouter.use('/monitor', monitorFrontendRouter)
 apiRouter.use('/vps', vpsRouter)
+apiRouter.use('/droplet', dropletRouter)
