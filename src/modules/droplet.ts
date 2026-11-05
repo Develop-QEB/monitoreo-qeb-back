@@ -42,15 +42,11 @@ dropletRouter.get('/logs/live', (req: Request, res: Response) => {
   res.flushHeaders()
   res.write(': stream droplet inicializado\n\n')
 
-  // Buffer reciente al conectar: SOLO lo de los ultimos minutos, para que la
-  // consola se sienta "en vivo" y no vuelque historia vieja (hasta 600 lineas)
-  // de golpe al abrir la tab. Lo nuevo sigue llegando por el evento 'line'.
-  const REPLAY_MS = 5 * 60_000
-  const cutoff = Date.now() - REPLAY_MS
+  // Replay al conectar: el ring (por fuente, acotado y con hora real de cada
+  // linea) para que cada consola muestre su historia reciente aunque la otra
+  // fuente sea muy habladora. Lo nuevo sigue llegando por el evento 'line'.
   for (const line of dropletLogHub.recent()) {
-    if (new Date(line.ts).getTime() >= cutoff) {
-      res.write(`data: ${JSON.stringify(line)}\n\n`)
-    }
+    res.write(`data: ${JSON.stringify(line)}\n\n`)
   }
 
   const onLine = (line: VpsLogLine) => {

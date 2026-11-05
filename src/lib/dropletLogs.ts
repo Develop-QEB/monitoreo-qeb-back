@@ -30,21 +30,44 @@ export const DROPLET_SOURCES: DropletSource[] = [
 
 const PM2_LOG_DIR = process.env.PM2_LOG_DIR || '/root/.pm2/logs'
 const PM2_BIN = process.env.PM2_BIN || '/usr/bin/pm2'
-const RING_SIZE = 600
+// Ring POR FUENTE: el proxy es muy hablador y, con un ring unico compartido,
+// desalojaba las lineas del autosync (que solo loguea cada ~30 min) dejando su
+// consola vacia. Con un ring por fuente cada consola conserva su propia historia.
+const RING_PER_SOURCE = 400
+const BACKFILL_LINES = 120
+
+// pm2 antepone un timestamp UTC a cada linea: "2026-11-05T16:17:53: <msg>".
+// Lo parseamos para usar la hora REAL del evento (no la de lectura) y para que el
+// backfill no haga parecer "de ahora" lineas viejas. Sin prefijo -> hora de lectura.
+const TS_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:[.,]\d+)?:\s?([\s\S]*)$/
+function parseLogLine(raw: string): { ts: string; msg: string } {
+  const m = TS_RE.exec(raw)
+  if (m) {
+    const d = new Date(m[1] + 'Z') // el prefijo de pm2 esta en UTC
+    if (!Number.isNaN(d.getTime())) return { ts: d.toISOString(), msg: m[2] }
+  }
+  return { ts: new Date().toISOString(), msg: raw }
+}
 
 class DropletLogHub extends EventEmitter {
-  private ring: VpsLogLine[] = []
+  private rings = new Map<string, VpsLogLine[]>()
   private _lastLineAt: number | null = null
 
   push(line: VpsLogLine): void {
-    this.ring.push(line)
-    if (this.ring.length > RING_SIZE) this.ring.shift()
+    const r = this.rings.get(line.source) ?? []
+    r.push(line)
+    if (r.length > RING_PER_SOURCE) r.shift()
+    this.rings.set(line.source, r)
     this._lastLineAt = Date.now()
     this.emit('line', line)
   }
 
+  // Todas las fuentes mezcladas y ordenadas por tiempo (para el replay al conectar).
   recent(): VpsLogLine[] {
-    return this.ring.slice()
+    const all: VpsLogLine[] = []
+    for (const r of this.rings.values()) all.push(...r)
+    all.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+    return all
   }
 
   get lastLineAt(): number | null {
@@ -70,11 +93,11 @@ export function startDropletTailers(): void {
 function spawnTail(s: DropletSource, files: string[]): void {
   let child
   try {
-    // -F sigue el archivo aunque aun no exista o rote. -n 0 = NO volcar lineas
-    // viejas al arrancar: solo lo nuevo. Si volcaramos (-n 60), esas lineas se
-    // estamparian con la hora de arranque (new Date()) y apareceria historia
-    // vieja como si fuera "en vivo" (p.ej. al reiniciar el back tras un deploy).
-    child = spawn('tail', ['-n', '0', '-F', ...files], { stdio: ['ignore', 'pipe', 'ignore'] })
+    // -F sigue el archivo aunque aun no exista o rote. Backfill de BACKFILL_LINES
+    // para que la consola NO salga vacia al abrir (clave para el autosync, que
+    // solo loguea cada ~30 min). Ya no re-fecha historia vieja: parseLogLine usa
+    // la hora real del prefijo de pm2, asi que las lineas viejas se ven viejas.
+    child = spawn('tail', ['-n', String(BACKFILL_LINES), '-F', ...files], { stdio: ['ignore', 'pipe', 'ignore'] })
   } catch {
     return // sin `tail` (p.ej. dev en Windows): simplemente no hay logs de droplet
   }
@@ -87,10 +110,11 @@ function spawnTail(s: DropletSource, files: string[]): void {
       const msg = raw.replace(/\s+$/, '')
       if (!msg) continue
       if (msg.startsWith('==> ') && msg.endsWith(' <==')) continue // headers de tail -F
+      const { ts, msg: clean } = parseLogLine(msg)
       dropletLogHub.push({
-        ts: new Date().toISOString(),
-        msg: msg.slice(0, 65000),
-        level: detectLevel(msg),
+        ts,
+        msg: clean.slice(0, 65000),
+        level: detectLevel(clean),
         source: s.key,
       })
     }
