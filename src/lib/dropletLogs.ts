@@ -70,8 +70,11 @@ export function startDropletTailers(): void {
 function spawnTail(s: DropletSource, files: string[]): void {
   let child
   try {
-    // -F sigue el archivo aunque aun no exista o rote; -n 60 da contexto inicial.
-    child = spawn('tail', ['-n', '60', '-F', ...files], { stdio: ['ignore', 'pipe', 'ignore'] })
+    // -F sigue el archivo aunque aun no exista o rote. -n 0 = NO volcar lineas
+    // viejas al arrancar: solo lo nuevo. Si volcaramos (-n 60), esas lineas se
+    // estamparian con la hora de arranque (new Date()) y apareceria historia
+    // vieja como si fuera "en vivo" (p.ej. al reiniciar el back tras un deploy).
+    child = spawn('tail', ['-n', '0', '-F', ...files], { stdio: ['ignore', 'pipe', 'ignore'] })
   } catch {
     return // sin `tail` (p.ej. dev en Windows): simplemente no hay logs de droplet
   }
