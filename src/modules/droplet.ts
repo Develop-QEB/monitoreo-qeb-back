@@ -6,6 +6,8 @@ import {
   getDropletStatus,
   startDropletTailers,
   DROPLET_SOURCES,
+  restartDropletProcess,
+  clearProxyCache,
 } from '../lib/dropletLogs'
 import type { VpsLogLine } from '../lib/vpsLogHub'
 
@@ -23,6 +25,40 @@ dropletRouter.get('/sources', requireAuth, (_req: Request, res: Response) => {
 dropletRouter.get('/status', requireAuth, async (_req: Request, res: Response) => {
   const procs = await getDropletStatus()
   res.json({ procs })
+})
+
+// ------- Reiniciar un proceso (boton en la tarjeta) -------
+// POST /droplet/restart/:source  (source = key de DROPLET_SOURCES: autosync | qeb-api)
+dropletRouter.post('/restart/:source', requireAuth, async (req: Request, res: Response) => {
+  const source = String(req.params.source)
+  const src = DROPLET_SOURCES.find((s) => s.key === source)
+  if (!src) return res.status(400).json({ error: 'fuente desconocida' })
+  const r = await restartDropletProcess(src.pm2)
+  res.status(r.ok ? 200 : 500).json({ ok: r.ok, pm2: src.pm2, output: r.output.slice(0, 1500) })
+})
+
+// ------- Limpiar cache del proxy SAP (solo aplica a qeb-api) -------
+// POST /droplet/clear-cache/:group  (group = todo | cimu | trade)
+const CACHE_GROUPS: Record<string, string[]> = {
+  todo: [], // sin key = limpia todo el cache del proxy
+  cimu: ['cuic', 'articulos'],
+  trade: ['cuic-trade', 'articulos-trade'],
+}
+dropletRouter.post('/clear-cache/:group', requireAuth, async (req: Request, res: Response) => {
+  const group = String(req.params.group)
+  const keys = CACHE_GROUPS[group]
+  if (!keys) return res.status(400).json({ error: 'grupo desconocido' })
+  if (keys.length === 0) {
+    const r = await clearProxyCache()
+    return res.status(r.ok ? 200 : 502).json({ ok: r.ok, cleared: 'todo', detail: r.body })
+  }
+  const results = []
+  for (const k of keys) results.push({ key: k, ...(await clearProxyCache(k)) })
+  res.status(results.every((x) => x.ok) ? 200 : 502).json({
+    ok: results.every((x) => x.ok),
+    cleared: group,
+    results,
+  })
 })
 
 // ------- SSE en vivo (una sola conexion; cada linea trae su `source`) -------

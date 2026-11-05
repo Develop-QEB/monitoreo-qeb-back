@@ -183,3 +183,27 @@ export function getDropletStatus(): Promise<DropletProcStatus[]> {
     })
   })
 }
+
+// URL local del proxy SAP (qeb-sap-proxy) para limpiar su cache sin exponerlo fuera.
+const SAP_PROXY_URL = process.env.SAP_PROXY_URL || 'http://127.0.0.1:3010'
+
+/** Reinicia un proceso de pm2 por nombre. Nunca lanza; devuelve ok + salida. */
+export function restartDropletProcess(pm2Name: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    execFile(PM2_BIN, ['restart', pm2Name], { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, output: `${stdout || ''}${stderr || ''}`.trim() })
+    })
+  })
+}
+
+/** Limpia el cache del proxy SAP (GET /clear-cache[?key=...]). key vacio = todo. */
+export async function clearProxyCache(key?: string): Promise<{ ok: boolean; status: number; body: string }> {
+  const url = key ? `${SAP_PROXY_URL}/clear-cache?key=${encodeURIComponent(key)}` : `${SAP_PROXY_URL}/clear-cache`
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    const body = (await r.text()).slice(0, 500)
+    return { ok: r.ok, status: r.status, body }
+  } catch (e) {
+    return { ok: false, status: 0, body: (e as Error).message }
+  }
+}
