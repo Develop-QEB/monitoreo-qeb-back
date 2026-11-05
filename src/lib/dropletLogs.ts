@@ -85,19 +85,22 @@ export function startDropletTailers(): void {
   if (started) return
   started = true
   for (const s of DROPLET_SOURCES) {
-    const files = [`${PM2_LOG_DIR}/${s.pm2}-out.log`, `${PM2_LOG_DIR}/${s.pm2}-error.log`]
-    spawnTail(s, files)
+    // El -out SI trae backfill (contexto reciente, para que la consola no salga
+    // vacia al abrir; clave para el autosync que solo loguea cada ~30 min).
+    // El -error NO (backfill 0): un proceso que erro y se recupero deja su
+    // *-error.log quieto con esos errores como ultima cola, y re-volcarlos en
+    // cada restart los hacia parecer "de ahora" (los del proxy ni siquiera
+    // traen timestamp de pm2 para fecharlos bien). Asi solo llegan errores NUEVOS.
+    spawnTail(s, `${PM2_LOG_DIR}/${s.pm2}-out.log`, BACKFILL_LINES)
+    spawnTail(s, `${PM2_LOG_DIR}/${s.pm2}-error.log`, 0)
   }
 }
 
-function spawnTail(s: DropletSource, files: string[]): void {
+function spawnTail(s: DropletSource, file: string, backfill: number): void {
   let child
   try {
-    // -F sigue el archivo aunque aun no exista o rote. Backfill de BACKFILL_LINES
-    // para que la consola NO salga vacia al abrir (clave para el autosync, que
-    // solo loguea cada ~30 min). Ya no re-fecha historia vieja: parseLogLine usa
-    // la hora real del prefijo de pm2, asi que las lineas viejas se ven viejas.
-    child = spawn('tail', ['-n', String(BACKFILL_LINES), '-F', ...files], { stdio: ['ignore', 'pipe', 'ignore'] })
+    // -F sigue el archivo aunque aun no exista o rote.
+    child = spawn('tail', ['-n', String(backfill), '-F', file], { stdio: ['ignore', 'pipe', 'ignore'] })
   } catch {
     return // sin `tail` (p.ej. dev en Windows): simplemente no hay logs de droplet
   }
@@ -123,8 +126,9 @@ function spawnTail(s: DropletSource, files: string[]): void {
     /* tail no disponible: no hacemos nada */
   })
   child.on('exit', () => {
-    // Si tail muere (rotacion rara, etc.), lo relanzamos.
-    setTimeout(() => spawnTail(s, files), 2000)
+    // Si tail muere (rotacion rara, etc.), lo relanzamos SIN backfill (0) para
+    // no re-volcar lineas viejas en cada relanzamiento.
+    setTimeout(() => spawnTail(s, file, 0), 2000)
   })
 }
 
